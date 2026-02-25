@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "HaskellFormatters.h"
+#include "HaskellIPE.h"
 
 #include "lldb/ValueObject/ValueObject.h"
 #include "lldb/Target/Process.h"
@@ -130,6 +131,23 @@ std::string ReadConDesc(Process *process, uint64_t info_ptr) {
   return ReadCString(process, desc_addr);
 }
 
+/// Append IPE provenance info to the stream if available.
+void AppendIPEInfo(Process *process, uint64_t info_ptr, Stream &s) {
+  ghc::ipe::InfoProv prov;
+  if (!ghc::ipe::LookupIPE(process, info_ptr, prov))
+    return;
+
+  // Show type :: Type if available
+  if (!prov.ty_desc.empty())
+    s.Printf(" :: %s", prov.ty_desc.c_str());
+
+  // Show source location if available
+  if (!prov.src_file.empty() && !prov.src_span.empty())
+    s.Printf(" (%s:%s)", prov.src_file.c_str(), prov.src_span.c_str());
+  else if (!prov.src_file.empty())
+    s.Printf(" (%s)", prov.src_file.c_str());
+}
+
 /// Describe a closure, following indirections up to a depth limit.
 void DescribeClosure(Process *process, uint64_t tagged_ptr, Stream &s,
                      int depth) {
@@ -161,16 +179,22 @@ void DescribeClosure(Process *process, uint64_t tagged_ptr, Stream &s,
     s.PutCString(ReadConDesc(process, info_ptr));
     if (tag > 0)
       s.Printf(" (tag=%u)", tag);
+    AppendIPEInfo(process, info_ptr, s);
   } else if (ghc::IsThunk(type)) {
     s.PutCString("<thunk>");
+    AppendIPEInfo(process, info_ptr, s);
   } else if (type == ghc::BLACKHOLE) {
     s.PutCString("<blackhole>");
+    AppendIPEInfo(process, info_ptr, s);
   } else if (ghc::IsFun(type)) {
     s.PutCString("<function>");
+    AppendIPEInfo(process, info_ptr, s);
   } else if (type == ghc::PAP) {
     s.PutCString("<partial application>");
+    AppendIPEInfo(process, info_ptr, s);
   } else if (type == ghc::AP) {
     s.PutCString("<application>");
+    AppendIPEInfo(process, info_ptr, s);
   } else if (ghc::IsInd(type)) {
     // Follow indirection: payload[0] is the target
     uint64_t target;

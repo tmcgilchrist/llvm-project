@@ -1,5 +1,6 @@
 # Check that `StgClosure *` values in a running Haskell program get the
-# closure summary.
+# closure summary, with provenance from the info table map (IPE). IPE
+# records the source file as it was passed to GHC.
 #
 # REQUIRES: ghc, target-x86_64, system-linux, native
 #
@@ -7,7 +8,7 @@
 # with --gc-sections and nothing uses lldb_test_closure, so keep it: GNU ld
 # drops the debug information of an object none of whose sections are kept.
 # RUN: rm -rf %t && mkdir -p %t && cp %S/Inputs/rts-types.c %t
-# RUN: %ghc -g -O1 -optc-g \
+# RUN: %ghc -g -O1 -optc-g -finfo-table-map -fdistinct-constructor-tables \
 # RUN:   -optl-Wl,--undefined=lldb_test_closure \
 # RUN:   -outputdir %t -o %t/tree %S/Inputs/tree.hs %t/rts-types.c
 #
@@ -25,8 +26,8 @@
 # CHECK: Category: ghc (enabled)
 
 # A function closure.
-# CHECK: (StgClosure *) {{.*}} <function>{{$}}
+# CHECK: (StgClosure *) {{.*}} <function> :: Tree Int -> Int ({{.*}}tree.hs:(10,1)-(11,42))
 
 # A constructor, untagged and tagged.
-# CHECK: (StgClosure *) {{.*}} ghc-prim:GHC.Types.Module{{$}}
-# CHECK: (StgClosure *) {{.*}} ghc-prim:GHC.Types.Module (tag=1){{$}}
+# CHECK: (StgClosure *) {{.*}} ghc-prim:GHC.Types.Module :: Module ({{.*}}tree.hs:1:1)
+# CHECK: (StgClosure *) {{.*}} ghc-prim:GHC.Types.Module (tag=1) :: Module ({{.*}}tree.hs:1:1)
