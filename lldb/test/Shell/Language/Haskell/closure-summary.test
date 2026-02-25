@@ -1,0 +1,32 @@
+# Check that `StgClosure *` values in a running Haskell program get the
+# closure summary.
+#
+# REQUIRES: ghc, target-x86_64, system-linux, native
+#
+# GHC writes a C file's object next to the source, so build a copy. GHC links
+# with --gc-sections and nothing uses lldb_test_closure, so keep it: GNU ld
+# drops the debug information of an object none of whose sections are kept.
+# RUN: rm -rf %t && mkdir -p %t && cp %S/Inputs/rts-types.c %t
+# RUN: %ghc -g -O1 -optc-g \
+# RUN:   -optl-Wl,--undefined=lldb_test_closure \
+# RUN:   -outputdir %t -o %t/tree %S/Inputs/tree.hs %t/rts-types.c
+#
+# Stop at the symbol itself. Prologue skipping follows the line table, and when
+# GHC's output goes through LLVM's assembler that has rows on info tables.
+# RUN: %lldb %t/tree -b \
+# RUN:   -o "breakpoint set -n Main_sumTree_info --skip-prologue false" \
+# RUN:   -o run \
+# RUN:   -o "type category list ghc" \
+# RUN:   -o "expr -l c -- (StgClosure *)&Main_sumTree_closure" \
+# RUN:   -o "expr -l c -- (StgClosure *)&Main_zdtrModule_closure" \
+# RUN:   -o "expr -l c -- (StgClosure *)((char *)&Main_zdtrModule_closure + 1)" \
+# RUN:   | FileCheck %s
+
+# CHECK: Category: ghc (enabled)
+
+# A function closure.
+# CHECK: (StgClosure *) {{.*}} <function>{{$}}
+
+# A constructor, untagged and tagged.
+# CHECK: (StgClosure *) {{.*}} ghc-prim:GHC.Types.Module{{$}}
+# CHECK: (StgClosure *) {{.*}} ghc-prim:GHC.Types.Module (tag=1){{$}}

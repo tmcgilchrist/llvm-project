@@ -8,13 +8,19 @@
 
 #include "HaskellLanguage.h"
 #include "HaskellDemangle.h"
+#include "HaskellFormatters.h"
 
 #include "lldb/Core/Mangled.h"
 #include "lldb/Core/PluginManager.h"
+#include "lldb/DataFormatters/DataVisualization.h"
+#include "lldb/DataFormatters/TypeCategory.h"
+#include "lldb/DataFormatters/TypeSummary.h"
 #include "lldb/Symbol/Symbol.h"
 #include "lldb/Symbol/SymbolContext.h"
 #include "lldb/Utility/ConstString.h"
 #include "lldb/Utility/Stream.h"
+
+#include "llvm/ADT/StringRef.h"
 
 using namespace lldb;
 using namespace lldb_private;
@@ -75,12 +81,48 @@ bool HaskellLanguage::GetFunctionDisplayName(
   return true;
 }
 
+/// The category that holds the summaries for the RTS's C types.
+static constexpr llvm::StringLiteral g_category_name = "ghc";
+
+/// RTS types for heap objects. Each starts with an info pointer.
+static constexpr llvm::StringLiteral g_closure_types[] = {
+    "StgClosure", "StgThunk",    "StgSelector", "StgPAP",
+    "StgAP",      "StgAP_STACK", "StgInd",      "StgIndStatic",
+};
+
+/// Adds the closure summary for the RTS closure types, and their pointers,
+/// to the `ghc` category and enables it. The summary can't come from
+/// Language::GetFormatters or GetHardcodedSummaries: LLDB asks a language
+/// for formatters only for values of that language, and these types are
+/// C. A category with no language applies to values of every language.
+static void RegisterClosureSummaries() {
+  TypeCategoryImplSP category_sp;
+  if (!DataVisualization::Categories::GetCategory(ConstString(g_category_name),
+                                                  category_sp) ||
+      !category_sp)
+    return;
+
+  auto summary_sp = std::make_shared<CXXFunctionSummaryFormat>(
+      TypeSummaryImpl::Flags()
+          .SetCascades(true)
+          .SetDontShowChildren(true)
+          .SetSkipPointers(false)
+          .SetSkipReferences(false),
+      formatters::HaskellClosureSummaryProvider,
+      "GHC closure summary provider");
+  for (llvm::StringRef type_name : g_closure_types)
+    category_sp->AddTypeSummary(type_name, eFormatterMatchExact, summary_sp);
+  DataVisualization::Categories::Enable(category_sp);
+}
+
 void HaskellLanguage::Initialize() {
   PluginManager::RegisterPlugin(GetPluginNameStatic(), "Haskell Language",
                                 CreateInstance);
+  RegisterClosureSummaries();
 }
 
 void HaskellLanguage::Terminate() {
+  DataVisualization::Categories::Delete(ConstString(g_category_name));
   PluginManager::UnregisterPlugin(CreateInstance);
 }
 

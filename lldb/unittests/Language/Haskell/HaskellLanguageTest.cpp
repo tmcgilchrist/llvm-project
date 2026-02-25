@@ -9,6 +9,8 @@
 #include "Plugins/Language/Haskell/HaskellLanguage.h"
 #include "TestingSupport/SubsystemRAII.h"
 #include "lldb/Core/Mangled.h"
+#include "lldb/DataFormatters/DataVisualization.h"
+#include "lldb/DataFormatters/TypeCategory.h"
 #include "lldb/Symbol/Symbol.h"
 #include "lldb/Symbol/SymbolContext.h"
 #include "lldb/Utility/StreamString.h"
@@ -135,4 +137,25 @@ TEST_F(HaskellLanguageTest, FunctionDisplayName) {
   StreamString s;
   EXPECT_FALSE(haskell->GetFunctionDisplayName(
       empty, nullptr, Language::FunctionNameRepresentation::eName, s));
+}
+
+TEST_F(HaskellLanguageTest, ClosureSummaryCategory) {
+  // The RTS types are C, so their summary lives in a category of its own
+  // rather than in the language's formatters.
+  TypeCategoryImplSP category;
+  ASSERT_TRUE(DataVisualization::Categories::GetCategory(
+      ConstString("ghc"), category, /*allow_create=*/false));
+  ASSERT_TRUE(category);
+  EXPECT_TRUE(category->IsEnabled());
+
+  auto summary_for = [&](llvm::StringRef type_name) {
+    return category->GetSummaryForType(std::make_shared<TypeNameSpecifierImpl>(
+        type_name, lldb::eFormatterMatchExact));
+  };
+  for (llvm::StringRef type_name :
+       {"StgClosure", "StgThunk", "StgPAP", "StgAP", "StgInd", "StgIndStatic"})
+    EXPECT_TRUE(summary_for(type_name)) << type_name.str();
+  // Info tables and words are not closures.
+  EXPECT_FALSE(summary_for("StgInfoTable"));
+  EXPECT_FALSE(summary_for("W_"));
 }
