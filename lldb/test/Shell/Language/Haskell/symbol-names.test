@@ -1,0 +1,30 @@
+# Check that breakpoint locations and disassembly show GHC symbols by their
+# Haskell names, and leave RTS and C symbols alone. Needs no GHC: the input is
+# assembled.
+#
+# `image lookup` and `image dump symtab` still print the raw names, because
+# LLDB indexes GHC symbols as unmangled.
+#
+# REQUIRES: x86
+# RUN: llvm-mc -triple=x86_64-pc-linux -filetype=obj %S/Inputs/ghc-symbols.s -o %t.o
+# RUN: %lldb %t.o -b \
+# RUN:   -o "breakpoint set -n Main_sumTree_info" \
+# RUN:   -o "breakpoint set -n Main_zdwmkTree_info" \
+# RUN:   -o "breakpoint set -n ghczminternal_GHCziInternalziBase_zpzp_info" \
+# RUN:   -o "breakpoint set -n _Main_sat_s1ZZ_entry" \
+# RUN:   -o "breakpoint set -n stg_ap_0_fast" \
+# RUN:   -o "breakpoint set -n mark_closure" \
+# RUN:   -o "disassemble -n Main_sumTree_info" \
+# RUN:   -o "disassemble -n mark_closure" \
+# RUN:   | FileCheck %s
+
+# CHECK: Breakpoint 1: where = {{.*}}`Main.sumTree, address =
+# CHECK: Breakpoint 2: where = {{.*}}`Main.$wmkTree, address =
+# CHECK: Breakpoint 3: where = {{.*}}`GHC.Internal.Base.++, address =
+# CHECK: Breakpoint 4: where = {{.*}}`Main.sat_s1ZZ, address =
+# CHECK: Breakpoint 5: where = {{.*}}`stg_ap_0_fast, address =
+# CHECK: Breakpoint 6: where = {{.*}}`mark_closure, address =
+# CHECK-LABEL: disassemble -n Main_sumTree_info
+# CHECK-NEXT: {{.*}}`Main.sumTree:
+# CHECK-LABEL: disassemble -n mark_closure
+# CHECK-NEXT: {{.*}}`mark_closure:

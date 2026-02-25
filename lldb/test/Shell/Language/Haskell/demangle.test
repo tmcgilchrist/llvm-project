@@ -1,0 +1,17 @@
+# Check that a running Haskell program's breakpoints and frames show Haskell
+# names.
+#
+# REQUIRES: ghc, target-x86_64, system-linux, native
+# RUN: rm -rf %t && mkdir -p %t
+# RUN: %ghc -g -O1 -outputdir %t -o %t/tree %S/Inputs/tree.hs
+# RUN: %lldb %t/tree -b \
+# RUN:   -o "breakpoint set -n Main_sumTree_info" \
+# RUN:   -o run \
+# RUN:   -o bt \
+# RUN:   | FileCheck %s
+
+# CHECK: Breakpoint 1: where = tree`Main.sumTree
+# CHECK: stop reason = breakpoint 1.1
+# CHECK-LABEL: (lldb) bt
+# CHECK: frame #0: {{.*}} tree`Main.sumTree at tree.hs:{{[0-9]+}}
+# CHECK: frame #1: {{.*}} tree`Main.main2 at tree.hs:{{[0-9]+}}
