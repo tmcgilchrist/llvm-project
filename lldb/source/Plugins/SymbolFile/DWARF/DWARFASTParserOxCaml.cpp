@@ -13,6 +13,9 @@
 #include "DWARFDefines.h"
 #include "SymbolFileDWARF.h"
 #include "llvm/BinaryFormat/Dwarf.h"
+#include "llvm/Demangle/Demangle.h"
+
+#include <cstdlib>
 
 #include "lldb/Symbol/Type.h"
 
@@ -317,18 +320,28 @@ DWARFASTParserOxCaml::CreateLLDBType(const DWARFDIE &die,
 
 ConstString
 DWARFASTParserOxCaml::ConstructDemangledNameFromDWARF(const DWARFDIE &die) {
-  // CR sspies: This function would be the right place to compute OCaml linkage
-  // names from mangled symbol names if they weren't provided via
-  // DW_AT_linkage_name.
+  // Return the source-level name for an OCaml function DIE. This is the single
+  // source of truth used for name-based lookups (see DWARFIndex and
+  // ManualDWARFIndex).
   //
-  // Currently, OxCaml emits both:
-  // - DW_AT_name: mangled symbol (e.g., "camlModule__function_1_2_code")
-  // - DW_AT_linkage_name: OCaml name (e.g., "Module.function")
-  //
-  // If OxCaml stopped emitting DW_AT_linkage_name, we would implement the
-  // demangling logic here. We would also need to update ParseFunctionFromDWARF.
+  // The flat mangling scheme emits the source-level name directly in
+  // DW_AT_name (e.g. "Module.function") alongside the mangled
+  // DW_AT_linkage_name, so we use DW_AT_name as-is. The structured scheme emits
+  // only DW_AT_linkage_name (e.g. "_CamlU6ModuleF8function"), so we demangle it
+  // to recover the source-level name.
+  if (const char *name = die.GetName(); name && name[0] != '\0')
+    return ConstString(name);
 
-  return ConstString(); // Currently returns empty as linkage names are provided
+  if (const char *linkage =
+          die.GetMangledName(/*substitute_name_allowed=*/false);
+      linkage && linkage[0] != '\0') {
+    if (char *demangled = llvm::oxcamlDemangle(linkage)) {
+      ConstString result(demangled);
+      std::free(demangled);
+      return result;
+    }
+  }
+  return ConstString();
 }
 
 Function *DWARFASTParserOxCaml::ParseFunctionFromDWARF(
@@ -365,16 +378,18 @@ Function *DWARFASTParserOxCaml::ParseFunctionFromDWARF(
            "ParseFunctionFromDWARF: DIE 0x{0:x16} name=\"{1}\" mangled=\"{2}\"",
            die.GetID(), name ? name : "<null>", mangled ? mangled : "<null>");
 
-  // DW_AT_linkage_name is the mangled OCaml symbol; lldb now demangles it
-  // (Mangled::GetManglingScheme recognises the OCaml schemes), so a single
-  // SetValue routes it through the standard demangling path and GetName()
-  // returns the source-level name. Fall back to DW_AT_name if there is no
-  // linkage name.
+  // Prefer DW_AT_name as the source-level name when it is present: the flat
+  // mangling scheme emits both DW_AT_name (e.g. "Module.function") and
+  // DW_AT_linkage_name (e.g. "camlModule__function_1_2_code"), and the former
+  // is authoritative, so we use it directly without demangling. The structured
+  // scheme emits only DW_AT_linkage_name, so when DW_AT_name is absent we
+  // record the linkage name as the mangled name and let the OxCaml demangler
+  // (via Mangled::GetManglingScheme) produce the demangled, source-level name.
   Mangled func_name;
+  if (name && strlen(name) > 0)
+    func_name.SetDemangledName(ConstString(name));
   if (mangled && strlen(mangled) > 0)
-    func_name.SetValue(ConstString(mangled));
-  else if (name && strlen(name) > 0)
-    func_name.SetValue(ConstString(name));
+    func_name.SetMangledName(ConstString(mangled));
   if (!func_name)
     return nullptr; // Must have a name
 

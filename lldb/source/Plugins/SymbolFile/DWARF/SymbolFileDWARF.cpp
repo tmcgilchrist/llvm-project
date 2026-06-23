@@ -1376,11 +1376,26 @@ size_t SymbolFileDWARF::ParseBlocksRecursive(CompileUnit &comp_unit,
                   call_file.value_or(0)),
               call_line.value_or(0), call_column.value_or(0));
 
-        // For OCaml, mangled_name is the mangled assembly symbol; lldb now
-        // demangles it through Mangled::GetManglingScheme(), so the default
-        // overload yields the source-level name in inlined backtraces.
-        block->SetInlinedFunctionInfo(name, mangled_name, decl_up.get(),
-                                      call_up.get());
+        // For OCaml, prefer DW_AT_name as the source-level name for inlined
+        // frames. The flat scheme emits both DW_AT_name and the mangled
+        // DW_AT_linkage_name, so we use DW_AT_name directly; the structured
+        // scheme emits only the linkage name, so we record it as the mangled
+        // name and let the OxCaml demangler produce the source-level name.
+        // InlineFunctionInfo::GetName() prefers the Mangled object, so build it
+        // explicitly rather than letting the char-pointer overload demangle the
+        // linkage name even when DW_AT_name is present.
+        if (GetLanguage(*die.GetCU()) == eLanguageTypeOCaml) {
+          Mangled inlined_mangled;
+          if (name && name[0] != '\0')
+            inlined_mangled.SetDemangledName(ConstString(name));
+          if (mangled_name && mangled_name[0] != '\0')
+            inlined_mangled.SetMangledName(ConstString(mangled_name));
+          block->SetInlinedFunctionInfo(ConstString(name), inlined_mangled,
+                                        decl_up.get(), call_up.get());
+        } else {
+          block->SetInlinedFunctionInfo(name, mangled_name, decl_up.get(),
+                                        call_up.get());
+        }
       }
 
       ++blocks_added;
