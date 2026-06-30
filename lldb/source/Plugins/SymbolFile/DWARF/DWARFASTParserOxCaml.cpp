@@ -329,12 +329,12 @@ DWARFASTParserOxCaml::ConstructDemangledNameFromDWARF(const DWARFDIE &die) {
   // DW_AT_linkage_name, so we use DW_AT_name as-is. The structured scheme emits
   // only DW_AT_linkage_name (e.g. "_CamlU6ModuleF8function"), so we demangle it
   // to recover the source-level name.
-  if (const char *name = die.GetName(); name && name[0] != '\0')
+  if (const char *name = die.GetName(); name && strlen(name) > 0)
     return ConstString(name);
 
   if (const char *linkage =
           die.GetMangledName(/*substitute_name_allowed=*/false);
-      linkage && linkage[0] != '\0') {
+      linkage && strlen(linkage) > 0) {
     if (char *demangled = llvm::oxcamlDemangle(linkage)) {
       ConstString result(demangled);
       std::free(demangled);
@@ -378,13 +378,10 @@ Function *DWARFASTParserOxCaml::ParseFunctionFromDWARF(
            "ParseFunctionFromDWARF: DIE 0x{0:x16} name=\"{1}\" mangled=\"{2}\"",
            die.GetID(), name ? name : "<null>", mangled ? mangled : "<null>");
 
-  // Prefer DW_AT_name as the source-level name when it is present: the flat
-  // mangling scheme emits both DW_AT_name (e.g. "Module.function") and
-  // DW_AT_linkage_name (e.g. "camlModule__function_1_2_code"), and the former
-  // is authoritative, so we use it directly without demangling. The structured
-  // scheme emits only DW_AT_linkage_name, so when DW_AT_name is absent we
-  // record the linkage name as the mangled name and let the OxCaml demangler
-  // (via Mangled::GetManglingScheme) produce the demangled, source-level name.
+  // Record DW_AT_name (the source-level name, e.g. "Module.function") as the
+  // demangled name and DW_AT_linkage_name as the mangled name. The flat scheme
+  // emits both; the structured scheme emits only the linkage name, which the
+  // OxCaml demangler turns into the source-level name on demand.
   Mangled func_name;
   if (name && strlen(name) > 0)
     func_name.SetDemangledName(ConstString(name));

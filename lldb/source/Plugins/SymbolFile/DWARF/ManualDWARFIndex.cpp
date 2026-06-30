@@ -362,7 +362,7 @@ void ManualDWARFIndex::IndexUnitImpl(DWARFUnit &unit,
           else
             set.function_basenames.Insert(ConstString(name), ref);
 
-          if (!is_method && !is_objc_method && !mangled_cstr)
+          if (!is_method && !mangled_cstr && !is_objc_method)
             set.function_fullnames.Insert(ConstString(name), ref);
         }
         if (mangled_cstr) {

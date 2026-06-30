@@ -1376,19 +1376,15 @@ size_t SymbolFileDWARF::ParseBlocksRecursive(CompileUnit &comp_unit,
                   call_file.value_or(0)),
               call_line.value_or(0), call_column.value_or(0));
 
-        // For OCaml, prefer DW_AT_name as the source-level name for inlined
-        // frames. The flat scheme emits both DW_AT_name and the mangled
-        // DW_AT_linkage_name, so we use DW_AT_name directly; the structured
-        // scheme emits only the linkage name, so we record it as the mangled
-        // name and let the OxCaml demangler produce the source-level name.
-        // InlineFunctionInfo::GetName() prefers the Mangled object, so build it
-        // explicitly rather than letting the char-pointer overload demangle the
-        // linkage name even when DW_AT_name is present.
+        // For OCaml, prefer DW_AT_name (the source-level name) when present and
+        // otherwise demangle the DW_AT_linkage_name (which for the structured
+        // scheme reconstructs the source name). Build the Mangled explicitly
+        // so both slots are populated correctly.
         if (GetLanguage(*die.GetCU()) == eLanguageTypeOCaml) {
           Mangled inlined_mangled;
-          if (name && name[0] != '\0')
+          if (name && strlen(name) > 0)
             inlined_mangled.SetDemangledName(ConstString(name));
-          if (mangled_name && mangled_name[0] != '\0')
+          if (mangled_name && strlen(mangled_name) > 0)
             inlined_mangled.SetMangledName(ConstString(mangled_name));
           block->SetInlinedFunctionInfo(ConstString(name), inlined_mangled,
                                         decl_up.get(), call_up.get());
