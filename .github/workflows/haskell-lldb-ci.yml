@@ -1,0 +1,125 @@
+name: Haskell LLDB CI
+
+# Builds clang, lld and lldb (including the Haskell language plugin) and runs
+# LLDB's unit and shell test suites. GHC is installed first, so the Haskell
+# shell tests that compile programs (REQUIRES: ghc) run as well.
+# Triggered on the Haskell development branch only (haskell-llvm-plugin).
+
+on:
+  push:
+    branches: [haskell-llvm-plugin]
+  pull_request:
+    branches: [haskell-llvm-plugin]
+
+# Cancel superseded runs on the same branch/PR to save runner time.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # The baseline compiler.
+  GHC_VERSION: "9.12.2"
+
+jobs:
+  build-and-test:
+    name: Build and test LLDB (Linux x86_64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    env:
+      CC: clang
+      CXX: clang++
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: "2G"
+      CCACHE_COMPRESS: "true"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build clang lld ccache python3 python3-dev swig
+
+      - name: Restore ccache
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          # Per-commit key so each run saves a fresh cache; restore-keys fall
+          # back to the most recent cache for this branch, then any branch.
+          key: ccache-${{ runner.os }}-${{ github.ref_name }}-${{ github.sha }}
+          restore-keys: |
+            ccache-${{ runner.os }}-${{ github.ref_name }}-
+            ccache-${{ runner.os }}-
+
+      - name: Configure (CMake + Ninja)
+        run: |
+          cmake -S llvm -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DLLVM_ENABLE_ASSERTIONS=ON \
+            -DLLVM_ENABLE_PROJECTS="clang;lld;lldb" \
+            -DLLVM_TARGETS_TO_BUILD=X86 \
+            -DLLVM_USE_LINKER=lld \
+            -DLLVM_CCACHE_BUILD=ON \
+            -DLLDB_ENABLE_PYTHON=ON \
+            -DLLDB_INCLUDE_TESTS=ON
+
+      - name: Build lldb
+        run: |
+          ccache --zero-stats
+          ninja -C build lldb lldb-server
+
+      # Build the unit-test and shell-test targets early so they are cached.
+      - name: Build test binaries
+        run: ninja -C build LLDBUnitTests lldb-shell-test-deps
+
+      - name: Save ccache
+        if: always()
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-${{ runner.os }}-${{ github.ref_name }}-${{ github.sha }}
+
+      # --- GHC ----------------------------------------------------------------
+      # The Haskell shell tests find GHC through LLDB_TEST_GHC (see
+      # lldb/test/Shell/Language/Haskell/lit.local.cfg).
+      #
+      # GHC's configure takes its C compiler from CC, and links with ld.lld
+      # whenever it finds one and LD is unset. Configure it as a default Linux
+      # install is, with gcc and GNU ld, rather than the clang and lld that
+      # build LLVM.
+      - name: Set up GHC
+        id: ghc
+        uses: haskell-actions/setup@v2
+        env:
+          CC: gcc
+          CXX: g++
+          LD: ld
+        with:
+          ghc-version: ${{ env.GHC_VERSION }}
+
+      - name: Point the tests at GHC
+        run: |
+          ghc_path="$(command -v ghc)"
+          "$ghc_path" --version
+          "$ghc_path" --info | grep -E '"(C compiler command|C compiler link flags|ld command)"'
+          echo "LLDB_TEST_GHC=$ghc_path" >> "$GITHUB_ENV"
+
+      - name: Unit tests (check-lldb-unit)
+        timeout-minutes: 45
+        run: ninja -C build check-lldb-unit
+
+      - name: Haskell shell tests
+        timeout-minutes: 15
+        run: ./build/bin/llvm-lit -v lldb/test/Shell/Language/Haskell
+
+      - name: Shell tests (check-lldb-shell)
+        timeout-minutes: 60
+        run: ninja -C build check-lldb-shell
+
+      - name: ccache statistics
+        if: always()
+        run: ccache --show-stats
